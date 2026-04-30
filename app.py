@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import json
+import os
 
 app = Flask(__name__)
 
@@ -25,10 +26,21 @@ def render():
 
     print("list.txt generado")
 
+    # 🔥 EJECUTAR FFMPEG
+    try:
+        os.system("""
+        ffmpeg -y -f concat -safe 0 -i list.txt \
+        -vsync vfr -pix_fmt yuv420p output.mp4
+        """)
+        print("video generado")
+    except Exception as e:
+        print("error ffmpeg:", e)
+
     return jsonify({
         "status": "ok",
-        "message": "list.txt generado"
+        "message": "video generado"
     })
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
