@@ -1,27 +1,11 @@
-import os
+FROM python:3.11
 
-@app.route("/render", methods=["POST"])
-def render():
-    data = request.json
+RUN apt update && apt install -y ffmpeg
 
-    images = data.get("images", [])
-    duration = data.get("duration", 3)
+WORKDIR /app
 
-    # crear list.txt
-    with open("list.txt", "w") as f:
-        for img in images:
-            f.write(f"file '{img}'\n")
-            f.write(f"duration {duration}\n")
-        if images:
-            f.write(f"file '{images[-1]}'\n")
+COPY . .
 
-    # 🔥 EJECUTAR FFMPEG
-    os.system("""
-        ffmpeg -y -f concat -safe 0 -i list.txt \
-        -vsync vfr -pix_fmt yuv420p output.mp4
-    """)
+RUN pip install -r requirements.txt
 
-    return {
-        "status": "ok",
-        "message": "video generado"
-    }
+CMD ["python", "app.py"]
