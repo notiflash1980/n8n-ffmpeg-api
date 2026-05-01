@@ -9,14 +9,14 @@ def render():
     data = request.json
 
     # guardar JSON
-    with open("data.json", "w") as f:
+    with open("/app/data.json", "w") as f:
         json.dump(data, f)
 
     images = data.get("images", [])
     duration = data.get("duration", 3)
 
     # generar list.txt
-    with open("list.txt", "w") as f:
+    with open("/app/list.txt", "w") as f:
         for img in images:
             f.write(f"file '{img}'\n")
             f.write(f"duration {duration}\n")
@@ -26,27 +26,27 @@ def render():
 
     print("list.txt generado")
 
-    # 🔥 EJECUTAR FFMPEG
-    try:
-        os.system("""
-        ffmpeg -y -f concat -safe 0 -i list.txt \
-        -vsync vfr -pix_fmt yuv420p output.mp4
-        """)
-        print("video generado")
-    except Exception as e:
-        print("error ffmpeg:", e)
+    # 🔥 VERIFICAR Y EJECUTAR FFMPEG (CORREGIDO)
+    print("verificando list.txt:", os.path.exists("/app/list.txt"))
+
+    if os.path.exists("/app/list.txt"):
+        cmd = "ffmpeg -y -f concat -safe 0 -i /app/list.txt -vsync vfr -pix_fmt yuv420p /app/output.mp4"
+        print("ejecutando:", cmd)
+        os.system(cmd)
+    else:
+        print("ERROR: list.txt no existe")
 
     return jsonify({
         "status": "ok",
-        "message": "video generado"
+        "message": "proceso ejecutado"
     })
 
 
-# 🟣 NUEVO ENDPOINT PARA VER EL VIDEO
+# 🟣 ENDPOINT PARA VER EL VIDEO
 @app.route("/video", methods=["GET"])
 def get_video():
     try:
-        return send_file("output.mp4", mimetype="video/mp4")
+        return send_file("/app/output.mp4", mimetype="video/mp4")
     except Exception as e:
         return jsonify({
             "status": "error",
