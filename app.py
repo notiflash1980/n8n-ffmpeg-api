@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 import json
 import os
 
@@ -40,6 +40,19 @@ def render():
         "status": "ok",
         "message": "video generado"
     })
+
+
+# 🟣 NUEVO ENDPOINT PARA VER EL VIDEO
+@app.route("/video", methods=["GET"])
+def get_video():
+    try:
+        return send_file("output.mp4", mimetype="video/mp4")
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 404
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
