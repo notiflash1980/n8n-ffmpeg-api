@@ -42,10 +42,18 @@ def render():
 
         # 🎬 GENERAR VIDEO
         result = os.system("""
-        ffmpeg -y -f concat -safe 0 -i list.txt \
-        -vf "fps=25,format=yuv420p" \
-        -vcodec libx264 output.mp4
-        """)
+audio_url = data.get("audio")
+
+if audio_url:
+    r = requests.get(audio_url)
+    with open("audio.mp3", "wb") as f:
+        f.write(r.content)
+ffmpeg -y -f concat -safe 0 -i list.txt \
+-vf "fps=25,format=yuv420p" \
+-vcodec libx264 \
+-i audio.mp3 -shortest \
+output.mp4
+""")
 
         if result != 0:
             return jsonify({
