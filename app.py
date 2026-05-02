@@ -32,10 +32,10 @@ def render():
 
     # 🎬 GENERAR VIDEO
     os.system("""
-        ffmpeg -y -f concat -safe 0 -i list.txt \
-        -vf "scale=720:1280,format=yuv420p" \
-        output.mp4
-    """)
+ffmpeg -y -f concat -safe 0 -i list.txt \
+-vf "fps=25,format=yuv420p" \
+-vcodec libx264 output.mp4
+""")
 
     return jsonify({
         "status": "ok",
