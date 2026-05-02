@@ -1,6 +1,7 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 import json
 import os
+import requests
 
 app = Flask(__name__)
 
@@ -8,52 +9,38 @@ app = Flask(__name__)
 def render():
     data = request.json
 
-    # guardar JSON
-    with open("/app/data.json", "w") as f:
-        json.dump(data, f)
-
     images = data.get("images", [])
-    duration = data.get("duration", 3)
+    duration = data.get("duration", 2)
 
-    # generar list.txt
-    with open("/app/list.txt", "w") as f:
-        for img in images:
+    local_images = []
+
+    # 🔽 DESCARGAR IMÁGENES
+    for i, url in enumerate(images):
+        filename = f"{i}.jpg"
+        r = requests.get(url)
+        with open(filename, "wb") as f:
+            f.write(r.content)
+        local_images.append(filename)
+
+    # 📝 CREAR list.txt
+    with open("list.txt", "w") as f:
+        for img in local_images:
             f.write(f"file '{img}'\n")
             f.write(f"duration {duration}\n")
+        if local_images:
+            f.write(f"file '{local_images[-1]}'\n")
 
-        if images:
-            f.write(f"file '{images[-1]}'\n")
-
-    print("list.txt generado")
-
-    # 🔥 VERIFICAR Y EJECUTAR FFMPEG (CORREGIDO)
-    print("verificando list.txt:", os.path.exists("/app/list.txt"))
-
-    if os.path.exists("/app/list.txt"):
-        cmd = "ffmpeg -y -f concat -safe 0 -i /app/list.txt -vsync vfr -pix_fmt yuv420p /app/output.mp4"
-        print("ejecutando:", cmd)
-        os.system(cmd)
-    else:
-        print("ERROR: list.txt no existe")
+    # 🎬 GENERAR VIDEO
+    os.system("""
+        ffmpeg -y -f concat -safe 0 -i list.txt \
+        -vf "scale=720:1280,format=yuv420p" \
+        output.mp4
+    """)
 
     return jsonify({
         "status": "ok",
-        "message": "proceso ejecutado"
+        "message": "video generado"
     })
 
-
-# 🟣 ENDPOINT PARA VER EL VIDEO
-@app.route("/video", methods=["GET"])
-def get_video():
-    try:
-        return send_file("/app/output.mp4", mimetype="video/mp4")
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 404
-
-
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
