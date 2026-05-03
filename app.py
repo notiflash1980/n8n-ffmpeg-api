@@ -1,22 +1,17 @@
-from flask import Flask, request, jsonify, send_file
-import os
-import requests
-import subprocess
-import threading # 🧵 Necesario para trabajar en segundo plano
+# ... (todo lo demás igual arriba)
 
-app = Flask(__name__)
-
-# Función que hace el trabajo pesado fuera de la ruta principal
 def generar_video_async(images, duration, audio_url):
     try:
+        # 1. Limpieza de archivos viejos al empezar
+        for f in ["output.mp4", "list.txt", "audio.mp3"]:
+            if os.path.exists(f): os.remove(f)
+
         local_images = []
-        # 1. Descarga
         for i, url in enumerate(images):
             filename = f"img_{i}.jpg"
             r = requests.get(url, timeout=10)
             if r.status_code == 200:
-                with open(filename, "wb") as f:
-                    f.write(r.content)
+                with open(filename, "wb") as f: f.write(r.content)
                 local_images.append(filename)
 
         # 2. Audio
@@ -24,70 +19,51 @@ def generar_video_async(images, duration, audio_url):
         if audio_url:
             r_audio = requests.get(audio_url, timeout=10)
             if r_audio.status_code == 200:
-                with open("audio.mp3", "wb") as f:
-                    f.write(r_audio.content)
+                with open("audio.mp3", "wb") as f: f.write(r_audio.content)
                 has_audio = True
 
-        # 3. List.txt
+        # 3. Crear list.txt
         with open("list.txt", "w") as f:
             for img in local_images:
                 f.write(f"file '{img}'\n")
                 f.write(f"duration {duration}\n")
             f.write(f"file '{local_images[-1]}'\n")
 
-        # 4. FFmpeg con configuración de bajo consumo
+        # 4. FFmpeg "MODO AHORRO DE RAM"
+        # Bajamos scale a 400 para que la RAM no explote en 30 segundos
         fps = 25
-        total_frames = duration * fps * len(images) # Ajustado para 30 seg
+        total_frames_per_img = duration * fps
         
-        # Filtro ultra-optimizado para no morir en el intento
         video_filter = (
-            f"scale=640:-1,zoompan=z='min(zoom+0.0015,1.25)':d={total_frames/len(images)}:s=720x1280:fps={fps},"
+            f"scale=400:-1,zoompan=z='min(zoom+0.0015,1.25)':d={total_frames_per_img}:s=720x1280:fps={fps},"
             "format=yuv420p"
         )
 
-        cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt"]
+        cmd = [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt"
+        ]
         if has_audio: cmd += ["-i", "audio.mp3"]
-        
+
         cmd += [
             "-vf", video_filter,
             "-vcodec", "libx264",
-            "-preset", "ultrafast", # Velocidad máxima
-            "-crf", "28",           # Comprime un poco más para ahorrar CPU
+            "-preset", "ultrafast",
+            "-tune", "stillimage",
+            "-threads", "1", # 👈 Limitamos a 1 solo núcleo para no saturar Render
             "-pix_fmt", "yuv420p"
         ]
-        
+
         if has_audio: cmd += ["-acodec", "aac", "-shortest"]
         cmd.append("output.mp4")
 
-        subprocess.run(cmd)
-        print("✅ Video de 30 segundos finalizado.")
-        
+        # Ejecutar y capturar el error en el log de Render
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"❌ FFMPEG ERROR LOG: {result.stderr}")
+        else:
+            print("✅ VIDEO GENERADO CON ÉXITO")
+
     except Exception as e:
-        print(f"❌ Error en proceso asíncrono: {e}")
+        print(f"❌ Error crítico: {e}")
 
-@app.route("/render", methods=["POST"])
-def render():
-    data = request.get_json()
-    images = data.get("images", [])
-    duration = data.get("duration", 5) # Si son 6 imágenes, pon 5 seg cada una
-    audio_url = data.get("audio")
-
-    # 🚀 LANZAR EN SEGUNDO PLANO
-    # Esto permite responderle a n8n en 1 milisegundo
-    thread = threading.Thread(target=generar_video_async, args=(images, duration, audio_url))
-    thread.start()
-
-    return jsonify({
-        "status": "processing",
-        "message": "El video se está generando en segundo plano. Revisa /video en unos minutos."
-    })
-
-@app.route("/video", methods=["GET"])
-def get_video():
-    if os.path.exists("output.mp4"):
-        return send_file("output.mp4", mimetype="video/mp4")
-    return jsonify({"status": "error", "message": "Video no listo o procesándose"}), 404
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+# ... (resto del código igual)
