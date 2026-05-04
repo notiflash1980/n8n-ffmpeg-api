@@ -3,85 +3,113 @@ import os
 import requests
 import subprocess
 import threading
-import sys # <-- IMPORTANTE: Para forzar la salida de logs
+import sys
+import time
 
 app = Flask(__name__)
 
-# Función para imprimir inmediatamente en los logs de Render
+# Función para que los logs aparezcan al instante en Render
 def log_info(mensaje):
     print(f"🔄 {mensaje}", flush=True)
 
 def generar_video_async(images, duration, audio_url):
     try:
-        log_info("INICIANDO HILO DE VIDEO")
+        log_info("--- INICIANDO PROCESO DE COCINADO ---")
         
-        # 1. Limpieza total antes de empezar
-        for f in ["output.mp4", "list.txt", "audio.mp3"]:
+        # 1. Limpieza de archivos de sesiones anteriores
+        archivos_a_limpiar = ["output.mp4", "list.txt", "audio.mp3"]
+        for i in range(10): # Limpiar posibles imágenes img_0...img_9
+            archivos_a_limpiar.append(f"img_{i}.jpg")
+            
+        for f in archivos_a_limpiar:
             if os.path.exists(f): 
-                os.remove(f)
-                log_info(f"Archivo residual eliminado: {f}")
+                try:
+                    os.remove(f)
+                except:
+                    pass
 
         local_images = []
-        log_info(f"Vamos a descargar {len(images)} imagenes de Pollinations.")
-        
-        for i, item in enumerate(images): # <-- CORRECCIÓN AQUÍ: n8n manda un array de objetos, no solo URLs directas
-            # Si 'item' es un diccionario, extraemos la URL. Si ya es un texto, lo usamos directo.
-            url = item.get("url") if isinstance(item, dict) else item
-            
-            filename = f"img_{i}.jpg"
-            log_info(f"Descargando {filename} desde {url[:50]}...")
-            
-            # Subimos el timeout a 30s porque Pollinations a veces es muy lento
-            r = requests.get(url, timeout=30) 
-            if r.status_code == 200:
-                with open(filename, "wb") as f: 
-                    f.write(r.content)
-                local_images.append(filename)
-                log_info(f"✅ {filename} descargada correctamente.")
-            else:
-                log_info(f"❌ Error al descargar {filename}: Código {r.status_code}")
+        log_info(f"Petición para procesar {len(images)} imágenes.")
 
-        # 2. Audio
+        # 2. Descarga de imágenes con sistema de reintentos (Antiflemas)
+        for i, item in enumerate(images):
+            # Extraemos la URL (n8n suele mandar [{'url': '...'}, ...])
+            url = item.get("url") if isinstance(item, dict) else item
+            filename = f"img_{i}.jpg"
+            
+            descargada = False
+            intentos_max = 3
+            
+            for intento in range(intentos_max):
+                try:
+                    log_info(f"Descargando {filename} (Intento {intento+1}/{intentos_max})...")
+                    # Timeout de 60s para darle tiempo a la IA de Pollinations
+                    r = requests.get(url, timeout=60)
+                    
+                    if r.status_code == 200:
+                        with open(filename, "wb") as f:
+                            f.write(r.content)
+                        local_images.append(filename)
+                        log_info(f"✅ {filename} lista.")
+                        descargada = True
+                        break
+                    else:
+                        log_info(f"⚠️ Pollinations respondió con error {r.status_code}. Reintentando...")
+                except Exception as e:
+                    log_info(f"⏳ Error o Timeout en {filename}. Reintentando en 2 segundos...")
+                    time.sleep(2)
+            
+            if not descargada:
+                log_info(f"❌ Saltando {filename} tras agotar reintentos.")
+
+        if not local_images:
+            log_info("❌ CRÍTICO: No se pudo descargar ninguna imagen. Abortando.")
+            return
+
+        # 3. Descarga de Audio (si existe)
         has_audio = False
         if audio_url:
-            log_info("Descargando audio...")
-            r_audio = requests.get(audio_url, timeout=10)
-            if r_audio.status_code == 200:
-                with open("audio.mp3", "wb") as f: f.write(r_audio.content)
-                has_audio = True
-                log_info("✅ Audio descargado.")
+            try:
+                log_info(f"Descargando audio desde: {audio_url[:50]}...")
+                r_audio = requests.get(audio_url, timeout=30)
+                if r_audio.status_code == 200:
+                    with open("audio.mp3", "wb") as f:
+                        f.write(r_audio.content)
+                    has_audio = True
+                    log_info("✅ Audio preparado.")
+            except:
+                log_info("⚠️ No se pudo obtener el audio, se generará el video mudo.")
 
-        # 3. Crear list.txt
-        log_info("Creando archivo list.txt...")
+        # 4. Creación del archivo de lista para FFmpeg
+        log_info("Generando list.txt...")
         with open("list.txt", "w") as f:
             for img in local_images:
                 f.write(f"file '{img}'\n")
                 f.write(f"duration {duration}\n")
-            # En FFmpeg la última imagen debe repetirse sin duración para evitar cuelgues
-            if local_images:
-                f.write(f"file '{local_images[-1]}'\n")
+            # Truco de FFmpeg: repetir la última imagen
+            f.write(f"file '{local_images[-1]}'\n")
 
-        # 4. CONFIGURACIÓN DE EMERGENCIA (Bajo consumo de RAM)
+        # 5. Configuración de FFmpeg (Modo Ahorro de Energía para Render)
         fps = 25
-        # d es la duración en frames por cada imagen individual
-        frames_por_imagen = duration * fps
+        frames_por_imagen = int(duration) * fps
         
-        # Bajamos la escala de proceso a 320 para que Render no sufra
+        # Filtro: Escala baja (320px) para no saturar la RAM y efecto Zoom suave
         video_filter = (
             f"scale=320:-1,zoompan=z='min(zoom+0.0015,1.25)':d={frames_por_imagen}:s=720x1280:fps={fps},"
             "format=yuv420p"
         )
 
         cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt"]
-        if has_audio: cmd += ["-i", "audio.mp3"]
+        if has_audio:
+            cmd += ["-i", "audio.mp3"]
 
         cmd += [
             "-vf", video_filter,
             "-vcodec", "libx264",
-            "-preset", "ultrafast",
-            "-maxrate", "1M",      # <--- Limita el uso de CPU/Datos
-            "-bufsize", "2M",      # <--- Limita el uso de RAM
-            "-threads", "1",       # <--- Usa solo un núcleo
+            "-preset", "ultrafast", # El más rápido para consumir menos CPU
+            "-maxrate", "1M",
+            "-bufsize", "2M",
+            "-threads", "1",        # Usar solo 1 núcleo para no ser baneado por Render
             "-pix_fmt", "yuv420p"
         ]
 
@@ -90,47 +118,52 @@ def generar_video_async(images, duration, audio_url):
         
         cmd.append("output.mp4")
 
-        log_info(f"Lanzando comando FFmpeg: {' '.join(cmd)}")
-
-        # Ejecución
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        log_info("🚀 Lanzando FFmpeg...")
         
-        if result.returncode != 0:
-            print(f"❌ ERROR FFmpeg: {result.stderr}", flush=True)
+        # Ejecutamos y capturamos salida
+        resultado = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if resultado.returncode == 0:
+            log_info("🏆 ¡VIDEO GENERADO CON ÉXITO!")
         else:
-            print("✅ VIDEO GENERADO EXITOSAMENTE", flush=True)
+            log_info(f"❌ ERROR EN FFMPEG: {resultado.stderr}")
 
     except Exception as e:
-        print(f"❌ ERROR CRÍTICO EN EL HILO: {e}", flush=True)
+        log_info(f"💥 ERROR CRÍTICO EN EL HILO: {str(e)}")
 
 @app.route("/render", methods=["POST"])
 def render():
-    print("🔔 Petición de Render recibida", flush=True)
+    log_info("🔔 Petición /render recibida.")
     data = request.get_json()
     
-    # IMPORTANTE: Si mandas un error desde n8n de golpe, veremos aquí qué llega realmente
     if not data:
-        return jsonify({"status": "error", "message": "No se recibió JSON"}), 400
+        return jsonify({"error": "No JSON data received"}), 400
 
     images = data.get("images", [])
-    duration = int(data.get("duration", 5)) # Aseguramos que sea entero
-    audio_url = data.get("audio")
+    duration = data.get("duration", 3)
+    audio = data.get("audio")
 
-    # Lanzar en segundo plano
-    thread = threading.Thread(target=generar_video_async, args=(images, duration, audio_url))
-    thread.start()
+    # Disparamos el hilo para que n8n no tenga que esperar
+    hilo = threading.Thread(target=generar_video_async, args=(images, duration, audio))
+    hilo.start()
 
     return jsonify({
         "status": "processing",
-        "message": "Generando video. Revisa /video en unos minutos."
-    }), 202 # <-- 202 Accepted es más correcto que 200
+        "message": "Cocinando el video. Revisa /video en unos minutos."
+    }), 202
 
 @app.route("/video", methods=["GET"])
 def get_video():
     if os.path.exists("output.mp4"):
         return send_file("output.mp4", mimetype="video/mp4")
-    return jsonify({"status": "error", "message": "Procesando o no encontrado"}), 404
+    return jsonify({"status": "error", "message": "Video no listo o fallido"}), 404
+
+# Ruta de bienvenida para el cron-job (que no de error 404)
+@app.route("/", methods=["GET"])
+def home():
+    return "Servidor de Video Activo 🎥", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+  
