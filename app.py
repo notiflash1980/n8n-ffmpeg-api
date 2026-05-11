@@ -1,169 +1,115 @@
-from flask import Flask, request, jsonify, send_file
 import os
-import requests
 import subprocess
 import threading
-import sys
-import time
+from flask import Flask, request, jsonify
+import requests
+import urllib.parse
+import random
+from gtts import gTTS
 
 app = Flask(__name__)
 
-# Función para que los logs aparezcan al instante en Render
-def log_info(mensaje):
-    print(f"🔄 {mensaje}", flush=True)
+# 👇 PON AQUÍ LA URL TEST DE TU NUEVO NODO WEBHOOK EN N8N 👇
+N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook-test/video-listo"
 
-def generar_video_async(images, duration, audio_url):
+def procesar_video_en_background(escenas):
+    """Esta función hace el trabajo pesado sin bloquear a n8n"""
+    archivos_mp4 = []
+    archivos_mp3 = []
+    archivos_jpg = []
+
     try:
-        log_info("--- INICIANDO PROCESO DE COCINADO ---")
-        
-        # 1. Limpieza de archivos de sesiones anteriores
-        archivos_a_limpiar = ["output.mp4", "list.txt", "audio.mp3"]
-        for i in range(10): # Limpiar posibles imágenes img_0...img_9
-            archivos_a_limpiar.append(f"img_{i}.jpg")
+        print("🔄 [FASE 1] Iniciando fabricación de mini-videos...")
+
+        for i, escena in enumerate(escenas):
+            prompt = escena.get('titulo', '')
+            texto = escena.get('subtitulo', '')
             
-        for f in archivos_a_limpiar:
-            if os.path.exists(f): 
-                try:
-                    os.remove(f)
-                except:
-                    pass
+            # --- 1. GENERAR AUDIO (gTTS) ---
+            print(f"🎙️ Generando audio {i}...")
+            tts = gTTS(text=texto, lang='es')
+            audio_file = f"audio_{i}.mp3"
+            tts.save(audio_file)
+            archivos_mp3.append(audio_file)
 
-        local_images = []
-        log_info(f"Petición para procesar {len(images)} imágenes.")
+            # --- 2. DESCARGAR IMAGEN ---
+            print(f"🖼️ Descargando imagen {i}...")
+            url_imagen = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=1080&height=1920&nologo=true"
+            img_file = f"img_{i}.jpg"
+            r = requests.get(url_imagen)
+            with open(img_file, 'wb') as f:
+                f.write(r.content)
+            archivos_jpg.append(img_file)
 
-        # 2. Descarga de imágenes con sistema de reintentos (Antiflemas)
-        for i, item in enumerate(images):
-            # Extraemos la URL (n8n suele mandar [{'url': '...'}, ...])
-            url = item.get("url") if isinstance(item, dict) else item
-            filename = f"img_{i}.jpg"
+            # --- 3. RULETA DE EFECTOS DE CÁMARA ---
+            # d=300 significa 12 segundos máximos. El video se cortará antes gracias al audio.
+            efectos = [
+                "zoompan=z='min(zoom+0.0015,1.5)':d=300:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2'", # Zoom In Centro
+                "zoompan=z=1.2:d=300:x='x+1':y='ih/2-(ih/zoom)/2'", # Pan Derecha
+                "zoompan=z=1.2:d=300:x='x-1':y='ih/2-(ih/zoom)/2'"  # Pan Izquierda
+            ]
+            efecto_elegido = random.choice(efectos)
+
+            # --- 4. RENDERIZAR MINI-VIDEO CON SUBTÍTULOS ---
+            print(f"🎬 Renderizando escena {i} con efecto aleatorio...")
+            scene_file = f"scene_{i}.mp4"
+            archivos_mp4.append(scene_file)
             
-            descargada = False
-            intentos_max = 3
-            
-            for intento in range(intentos_max):
-                try:
-                    log_info(f"Descargando {filename} (Intento {intento+1}/{intentos_max})...")
-                    # Timeout de 60s para darle tiempo a la IA de Pollinations
-                    r = requests.get(url, timeout=60)
-                    
-                    if r.status_code == 200:
-                        with open(filename, "wb") as f:
-                            f.write(r.content)
-                        local_images.append(filename)
-                        log_info(f"✅ {filename} lista.")
-                        descargada = True
-                        break
-                    else:
-                        log_info(f"⚠️ Pollinations respondió con error {r.status_code}. Reintentando...")
-                except Exception as e:
-                    log_info(f"⏳ Error o Timeout en {filename}. Reintentando en 2 segundos...")
-                    time.sleep(2)
-            
-            if not descargada:
-                log_info(f"❌ Saltando {filename} tras agotar reintentos.")
+            # Limpiamos el texto de comillas para no romper FFmpeg
+            texto_limpio = texto.replace("'", "").replace(":", "\\:")
 
-        if not local_images:
-            log_info("❌ CRÍTICO: No se pudo descargar ninguna imagen. Abortando.")
-            return
+            cmd_escena = [
+                "ffmpeg", "-y",
+                "-loop", "1", "-framerate", "25", "-i", img_file,
+                "-i", audio_file,
+                "-vf", f"scale=-2:1080,format=yuv420p,{efecto_elegido},drawtext=text='{texto_limpio}':fontcolor=white:fontsize=48:x=(w-text_w)/2:y=h-(h/4):box=1:boxcolor=black@0.6:boxborderw=10",
+                "-c:v", "libx264", "-preset", "ultrafast",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest", # TRUCO DE MAGIA: Corta el video exactamente cuando termina el audio de gTTS
+                scene_file
+            ]
+            subprocess.run(cmd_escena, check=True)
+            print(f"✅ Escena {i} completada.")
 
-        # 3. Descarga de Audio (si existe)
-        has_audio = False
-        if audio_url:
-            try:
-                log_info(f"Descargando audio desde: {audio_url[:50]}...")
-                r_audio = requests.get(audio_url, timeout=30)
-                if r_audio.status_code == 200:
-                    with open("audio.mp3", "wb") as f:
-                        f.write(r_audio.content)
-                    has_audio = True
-                    log_info("✅ Audio preparado.")
-            except:
-                log_info("⚠️ No se pudo obtener el audio, se generará el video mudo.")
-
-        # 4. Creación del archivo de lista para FFmpeg
-        log_info("Generando list.txt...")
+        # --- 5. UNIR TODOS LOS MINI-VIDEOS ---
+        print("🧩 [FASE 2] Uniendo las escenas...")
         with open("list.txt", "w") as f:
-            for img in local_images:
-                f.write(f"file '{img}'\n")
-                f.write(f"duration {duration}\n")
-            # Truco de FFmpeg: repetir la última imagen
-            f.write(f"file '{local_images[-1]}'\n")
+            for mp4 in archivos_mp4:
+                f.write(f"file '{mp4}'\n")
 
-        # 5. Configuración de FFmpeg (Modo Ahorro de Energía para Render)
-        fps = 25
-        frames_por_imagen = int(duration) * fps
-        
-        # Filtro: Escala baja (320px) para no saturar la RAM y efecto Zoom suave
-        video_filter = (
-            f"scale=320:-1,zoompan=z='min(zoom+0.0015,1.25)':d={frames_por_imagen}:s=720x1280:fps={fps},"
-            "format=yuv420p"
-        )
-
-        cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt"]
-        if has_audio:
-            cmd += ["-i", "audio.mp3"]
-
-        cmd += [
-            "-vf", video_filter,
-            "-vcodec", "libx264",
-            "-preset", "ultrafast", # El más rápido para consumir menos CPU
-            "-maxrate", "1M",
-            "-bufsize", "2M",
-            "-threads", "1",        # Usar solo 1 núcleo para no ser baneado por Render
-            "-pix_fmt", "yuv420p"
+        cmd_concat = [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt",
+            "-c", "copy", "output_final.mp4"
         ]
+        subprocess.run(cmd_concat, check=True)
+        print("🏆 ¡VIDEO FINAL GENERADO CON ÉXITO!")
 
-        if has_audio:
-            cmd += ["-acodec", "aac", "-shortest"]
-        
-        cmd.append("output.mp4")
-
-        log_info("🚀 Lanzando FFmpeg...")
-        
-        # Ejecutamos y capturamos salida
-        resultado = subprocess.run(cmd, capture_output=True, text=True)
-        
-        if resultado.returncode == 0:
-            log_info("🏆 ¡VIDEO GENERADO CON ÉXITO!")
-        else:
-            log_info(f"❌ ERROR EN FFMPEG: {resultado.stderr}")
+        # --- 6. ENVIAR A N8N (EL REPARTIDOR) ---
+        print("📬 Enviando video al Webhook de n8n...")
+        with open("output_final.mp4", "rb") as video_file:
+            files = {'video': ('video_final.mp4', video_file, 'video/mp4')}
+            requests.post(N8N_WEBHOOK_URL, files=files)
+        print("🚀 ¡Envío completado!")
 
     except Exception as e:
-        log_info(f"💥 ERROR CRÍTICO EN EL HILO: {str(e)}")
+        print(f"❌ Error catastrófico en el background: {e}")
 
-@app.route("/render", methods=["POST"])
-def render():
-    log_info("🔔 Petición /render recibida.")
-    data = request.get_json()
+@app.route('/render', methods=['POST'])
+def generar_video():
+    """Recibe la orden de n8n y suelta la conexión al instante"""
+    data = request.json
+    escenas = data.get('lista_escenas', [])
     
-    if not data:
-        return jsonify({"error": "No JSON data received"}), 400
+    if not escenas:
+        return jsonify({"error": "No se encontró la lista_escenas"}), 400
 
-    images = data.get("images", [])
-    duration = data.get("duration", 3)
-    audio = data.get("audio")
-
-    # Disparamos el hilo para que n8n no tenga que esperar
-    hilo = threading.Thread(target=generar_video_async, args=(images, duration, audio))
+    # Lanzamos el trabajo pesado en un hilo separado
+    hilo = threading.Thread(target=procesar_video_en_background, args=(escenas,))
     hilo.start()
 
-    return jsonify({
-        "status": "processing",
-        "message": "Cocinando el video. Revisa /video en unos minutos."
-    }), 202
+    # Le decimos a n8n: "Mensaje recibido, yo me encargo, ya te puedes ir"
+    return jsonify({"status": "Procesamiento iniciado. Te avisaré al Webhook cuando termine."}), 202
 
-@app.route("/video", methods=["GET"])
-def get_video():
-    if os.path.exists("output.mp4"):
-        return send_file("output.mp4", mimetype="video/mp4")
-    return jsonify({"status": "error", "message": "Video no listo o fallido"}), 404
-
-# Ruta de bienvenida para el cron-job (que no de error 404)
-@app.route("/", methods=["GET"])
-def home():
-    return "Servidor de Video Activo 🎥", 200
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-  
+    app.run(host='0.0.0.0', port=port)
