@@ -1,2 +1,3 @@
 flask
 requests
+gTTS==2.5.1
