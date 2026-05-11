@@ -10,7 +10,7 @@ from gtts import gTTS
 app = Flask(__name__)
 
 # 👇 PON AQUÍ LA URL TEST DE TU NUEVO NODO WEBHOOK EN N8N 👇
-N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook-test/video-listo"
+N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook/video-listo"
 
 def procesar_video_en_background(escenas):
     """Esta función hace el trabajo pesado sin bloquear a n8n"""
