@@ -15,8 +15,7 @@ N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook/video-listo"
 
 async def generar_voz_masculina(texto, archivo_salida):
     """Voz de Álvaro con velocidad aumentada (+15%)"""
-    # 'rate=+15%' hace que hable más fluido y menos pausado
-    communicate = edge_tts.Communicate(texto, "es-ES-AlvaroNeural", rate="+15%")
+    communicate = edge_tts.Communicate(texto, "es-ES-JorgeNeural", rate="+15%")
     await communicate.save(archivo_salida)
 
 def procesar_video_en_background(escenas):
@@ -28,7 +27,7 @@ def procesar_video_en_background(escenas):
             prompt = escena.get('titulo', '')
             texto = escena.get('subtitulo', '')
             
-            # --- 1. AUDIO (Más rápido) ---
+            # --- 1. AUDIO ---
             audio_file = f"audio_{i}.mp3"
             asyncio.run(generar_voz_masculina(texto, audio_file))
 
@@ -39,10 +38,12 @@ def procesar_video_en_background(escenas):
             with open(img_file, 'wb') as f:
                 f.write(r.content)
 
-            # --- 3. PROCESAR TEXTO (Salto de línea automático) ---
-            # Cortamos el texto cada 30 caracteres para que no se salga de la pantalla
-            texto_con_saltos = "\n".join(textwrap.wrap(texto, width=30))
-            texto_limpio = texto_con_saltos.replace("'", "").replace(":", "\\:")
+            # --- 3. TEXTO (SOLUCIÓN DEL CUADRADITO []) ---
+            texto_con_saltos = "\n".join(textwrap.wrap(texto, width=28))
+            txt_file = f"subtitulo_{i}.txt"
+            # Guardamos el texto en un archivo temporal en UTF-8
+            with open(txt_file, "w", encoding="utf-8") as f:
+                f.write(texto_con_saltos)
 
             # --- 4. MOVIMIENTO DE CÁMARA ---
             efectos = [
@@ -52,14 +53,14 @@ def procesar_video_en_background(escenas):
             ]
             efecto_elegido = random.choice(efectos)
 
-            # --- 5. RENDER (Estilo de Subtítulo Mejorado) ---
+            # --- 5. RENDER (Amarillo + textfile) ---
             scene_file = f"scene_{i}.mp4"
             archivos_mp4.append(scene_file)
             
-            # Nuevo estilo: Texto más grande, borde grueso (5), sombra y margen de seguridad (y=h-500)
+            # Usamos textfile= en lugar de text=. Cambiamos a Yellow.
             style = (
-                f"drawtext=text='{texto_limpio}':fontcolor=white:fontsize=65:x=(w-text_w)/2:y=h-600:"
-                f"borderw=4:bordercolor=black@0.8:shadowcolor=black@0.5:shadowx=4:shadowy=4:line_spacing=10"
+                f"drawtext=textfile='{txt_file}':fontcolor=Yellow:fontsize=65:x=(w-text_w)/2:y=h-600:"
+                f"borderw=4:bordercolor=black@0.9:shadowcolor=black@0.6:shadowx=5:shadowy=5:line_spacing=15"
             )
 
             cmd_escena = [
@@ -100,7 +101,7 @@ def generar_video():
     escenas = data.get('lista_escenas', [])
     if not escenas: return jsonify({"error": "No data"}), 400
     threading.Thread(target=procesar_video_en_background, args=(escenas,)).start()
-    return jsonify({"status": f"Procesando {len(escenas)} escenas con Álvaro Veloz..."}), 202
+    return jsonify({"status": "Procesando nuevo estilo..."}), 202
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
