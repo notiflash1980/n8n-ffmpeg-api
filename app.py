@@ -15,7 +15,7 @@ N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook/video-listo"
 
 async def generar_voz_masculina(texto, archivo_salida):
     """Voz de Álvaro con velocidad aumentada (+15%)"""
-    communicate = edge_tts.Communicate(texto, "es-ES-JorgeNeural", rate="+15%")
+    communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+15%")
     await communicate.save(archivo_salida)
 
 def procesar_video_en_background(escenas):
