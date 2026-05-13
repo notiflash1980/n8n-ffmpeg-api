@@ -67,7 +67,7 @@ def procesar_video_en_background(escenas):
                 "ffmpeg", "-y",
                 "-loop", "1", "-framerate", "25", "-i", img_file,
                 "-i", audio_file,
-                "-vf", f"format=yuv420p,{efecto_elegido},{style}",
+                "-vf", f"format=yuv420p,{efecto_elegido}",
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "192k",
                 "-shortest",
