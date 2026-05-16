@@ -18,21 +18,20 @@ async def generar_voz_masculina(texto, archivo_salida):
     communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+15%")
     await communicate.save(archivo_salida)
 
-def procesar_video_en_background(escenas):
+async def produccion_video_async(escenas):
+    """Motor asíncrono principal que controla el bucle sin fugas de memoria RAM"""
     archivos_mp4 = []
     
     try:
-        # Aquí imprime cuántas escenas llegaron dinámicamente
         print(f"🎬 Iniciando producción de {len(escenas)} escenas...")
         
-        # BUCLE DINÁMICO: 'enumerate' se adapta a la cantidad exacta de escenas recibidas
         for i, escena in enumerate(escenas):
             prompt = escena.get('titulo', '')
             texto = escena.get('subtitulo', '')
             
-            # --- 1. AUDIO ---
+            # --- 1. AUDIO (Corregido: Ejecución directa sin duplicar bucles) ---
             audio_file = f"audio_{i}.mp3"
-            asyncio.run(generar_voz_masculina(texto, audio_file))
+            await generar_voz_masculina(texto, audio_file)
 
             # --- 2. IMAGEN ---
             url_imagen = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=1080&height=1920&nologo=true"
@@ -41,10 +40,9 @@ def procesar_video_en_background(escenas):
             with open(img_file, 'wb') as f:
                 f.write(r.content)
 
-            # --- 3. TEXTO (SOLUCIÓN DEL CUADRADITO []) ---
+            # --- 3. TEXTO ---
             texto_con_saltos = "\n".join(textwrap.wrap(texto, width=28))
             txt_file = f"subtitulo_{i}.txt"
-            # Guardamos el texto en un archivo temporal en UTF-8
             with open(txt_file, "w", encoding="utf-8") as f:
                 f.write(texto_con_saltos)
 
@@ -56,33 +54,27 @@ def procesar_video_en_background(escenas):
             ]
             efecto_elegido = random.choice(efectos)
 
-            # --- 5. RENDER (Amarillo + textfile) ---
+            # --- 5. RENDER ---
             scene_file = f"scene_{i}.mp4"
             archivos_mp4.append(scene_file)
             
-            # Usamos textfile= en lugar de text=. Cambiamos a Yellow.
-            style = (
-                f"drawtext=textfile='{txt_file}':fontcolor=Yellow:fontsize=65:x=(w-text_w)/2:y=h-600:"
-                f"borderw=4:bordercolor=black@0.9:shadowcolor=black@0.6:shadowx=5:shadowy=5:line_spacing=15"
-            )
-
             cmd_escena = [
                 "ffmpeg", "-y",
                 "-loop", "1", "-framerate", "25", "-i", img_file,
                 "-i", audio_file,
-                # NOTA: Los subtítulos están APAGADOS provisionalmente. 
-                # Para encenderlos, cambia esta línea a: "-vf", f"format=yuv420p,{efecto_elegido},{style}",
                 "-vf", f"format=yuv420p,{efecto_elegido}",
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "192k",
                 "-shortest",
                 scene_file
             ]
+            
+            # Ejecutamos FFmpeg de forma limpia
             subprocess.run(cmd_escena, check=True)
-            print(f"✅ Escena {i} lista.")
+            print(f"✅ Escena {i} lista y empaquetada.")
 
-        # --- 6. UNIR Y ENVIAR ---
-        print("🧩 Uniendo video final...")
+        # --- 6. UNIR LAS PIEZAS ---
+        print("🧩 Concatonando master final...")
         with open("list.txt", "w") as f:
             for mp4 in archivos_mp4:
                 f.write(f"file '{mp4}'\n")
@@ -93,19 +85,30 @@ def procesar_video_en_background(escenas):
         ]
         subprocess.run(cmd_concat, check=True)
 
+        # --- 7. ENVIAR EL PRODUCTO ---
         with open("output_final.mp4", "rb") as video_file:
             requests.post(N8N_WEBHOOK_URL, files={'video': ('video.mp4', video_file, 'video/mp4')})
-        print("🚀 Video enviado con éxito.")
+        print("🚀 ¡Video enviado a n8n con éxito!")
 
     except Exception as e:
-        print(f"❌ Error catastrófico: {e}")
+        print(f"❌ Error catastrófico en la línea de montaje: {e}")
+
+def iniciar_hilo_de_render(escenas):
+    """Crea un entorno limpio aislado para el proceso de renderizado asíncrono"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(produccion_video_async(escenas))
+    loop.close()
 
 @app.route('/render', methods=['POST'])
 def generar_video():
     data = request.json
     escenas = data.get('lista_escenas', [])
-    if not escenas: return jsonify({"error": "No data"}), 400
-    threading.Thread(target=procesar_video_en_background, args=(escenas,)).start()
+    if not escenas: 
+        return jsonify({"error": "No data"}), 400
+        
+    # Arrancamos el hilo limpio que controlará la asincronía sin ahogar la RAM de Flask
+    threading.Thread(target=iniciar_hilo_de_render, args=(escenas,)).start()
     return jsonify({"status": "Procesando nuevo estilo..."}), 202
 
 if __name__ == '__main__':
