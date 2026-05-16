@@ -3,7 +3,7 @@ import subprocess
 import threading
 import asyncio
 import textwrap
-import time  # <--- IMPORTANTE: Para meter el respiro
+import time
 from flask import Flask, request, jsonify
 import requests
 import urllib.parse
@@ -14,13 +14,17 @@ app = Flask(__name__)
 
 N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook/video-listo"
 
-async def generar_voz_masculina(texto, archivo_salida):
-    """Voz de Álvaro con velocidad aumentada (+15%)"""
-    communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+15%")
-    await communicate.save(archivo_salida)
+def generar_voz_sincrona(texto, archivo_salida):
+    """Ejecuta edge-tts de forma aislada y limpia para evitar fugas de memoria"""
+    async def _async_run():
+        communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+15%")
+        await communicate.save(archivo_salida)
+    
+    # Creamos y cerramos el bucle en una sola línea segura
+    asyncio.run(_async_run())
 
-async def produccion_video_async(escenas):
-    """Motor asíncrono principal sin fugas de memoria y con protección de imágenes"""
+def procesar_video_en_background(escenas):
+    """Línea de montaje síncrona, limpia y segura para la RAM de Render"""
     archivos_mp4 = []
     
     try:
@@ -32,7 +36,7 @@ async def produccion_video_async(escenas):
             
             # --- 1. AUDIO ---
             audio_file = f"audio_{i}.mp3"
-            await generar_voz_masculina(texto, audio_file)
+            generar_voz_sincrona(texto, audio_file)
 
             # --- 2. IMAGEN CON SISTEMA ANTI-BLOQUEO ---
             img_file = f"img_{i}.jpg"
@@ -41,11 +45,10 @@ async def produccion_video_async(escenas):
             print(f"📸 Solicitando imagen {i} a la IA...")
             r = requests.get(url_imagen)
             
-            # Verificación: Si Pollinations no devuelve un JPEG real, usamos la rueda de repuesto
+            # Verificación de imagen corrupta (Rueda de repuesto)
             if r.status_code != 200 or b"JFIF" not in r.content[:100] and b"ffd8" not in r.content.hex()[:10]:
                 print(f"⚠️ Pollinations rechazó la escena {i}. Activando imagen de emergencia...")
-                palabra_clave = urllib.parse.quote(texto.split()[-1]) # Usa la última palabra del subtítulo
-                url_emergencia = f"https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1080&h=1920&fit=crop"
+                url_emergencia = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1080&h=1920&fit=crop"
                 r = requests.get(url_emergencia)
 
             with open(img_file, 'wb') as f:
@@ -83,8 +86,7 @@ async def produccion_video_async(escenas):
             subprocess.run(cmd_escena, check=True)
             print(f"✅ Escena {i} lista y empaquetada.")
             
-            # --- PAUSA ANTI-SPAM (Crucial para no quemar la IP) ---
-            print("⏳ Dándole 4 segundos de respiro a los servidores de imágenes...")
+            # Pausa anti-bloqueo
             time.sleep(4)
 
         # --- 6. UNIR LAS PIEZAS ---
@@ -107,12 +109,6 @@ async def produccion_video_async(escenas):
     except Exception as e:
         print(f"❌ Error catastrófico en la línea de montaje: {e}")
 
-def iniciar_hilo_de_render(escenas):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(produccion_video_async(escenas))
-    loop.close()
-
 @app.route('/render', methods=['POST'])
 def generar_video():
     data = request.json
@@ -120,7 +116,8 @@ def generar_video():
     if not escenas: 
         return jsonify({"error": "No data"}), 400
         
-    threading.Thread(target=iniciar_hilo_de_render, args=(escenas,)).start()
+    # Volvemos al método de hilo síncrono nativo que Render sí acepta perfectamente
+    threading.Thread(target=procesar_video_en_background, args=(escenas,)).start()
     return jsonify({"status": "Procesando nuevo estilo..."}), 202
 
 if __name__ == '__main__':
