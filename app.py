@@ -22,7 +22,10 @@ def procesar_video_en_background(escenas):
     archivos_mp4 = []
     
     try:
+        # Aquí imprime cuántas escenas llegaron dinámicamente
         print(f"🎬 Iniciando producción de {len(escenas)} escenas...")
+        
+        # BUCLE DINÁMICO: 'enumerate' se adapta a la cantidad exacta de escenas recibidas
         for i, escena in enumerate(escenas):
             prompt = escena.get('titulo', '')
             texto = escena.get('subtitulo', '')
@@ -67,6 +70,8 @@ def procesar_video_en_background(escenas):
                 "ffmpeg", "-y",
                 "-loop", "1", "-framerate", "25", "-i", img_file,
                 "-i", audio_file,
+                # NOTA: Los subtítulos están APAGADOS provisionalmente. 
+                # Para encenderlos, cambia esta línea a: "-vf", f"format=yuv420p,{efecto_elegido},{style}",
                 "-vf", f"format=yuv420p,{efecto_elegido}",
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "192k",
