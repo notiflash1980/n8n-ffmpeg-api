@@ -3,6 +3,7 @@ import subprocess
 import threading
 import asyncio
 import textwrap
+import time  # <--- IMPORTANTE: Para meter el respiro
 from flask import Flask, request, jsonify
 import requests
 import urllib.parse
@@ -19,7 +20,7 @@ async def generar_voz_masculina(texto, archivo_salida):
     await communicate.save(archivo_salida)
 
 async def produccion_video_async(escenas):
-    """Motor asíncrono principal que controla el bucle sin fugas de memoria RAM"""
+    """Motor asíncrono principal sin fugas de memoria y con protección de imágenes"""
     archivos_mp4 = []
     
     try:
@@ -29,14 +30,24 @@ async def produccion_video_async(escenas):
             prompt = escena.get('titulo', '')
             texto = escena.get('subtitulo', '')
             
-            # --- 1. AUDIO (Corregido: Ejecución directa sin duplicar bucles) ---
+            # --- 1. AUDIO ---
             audio_file = f"audio_{i}.mp3"
             await generar_voz_masculina(texto, audio_file)
 
-            # --- 2. IMAGEN ---
-            url_imagen = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=1080&height=1920&nologo=true"
+            # --- 2. IMAGEN CON SISTEMA ANTI-BLOQUEO ---
             img_file = f"img_{i}.jpg"
+            url_imagen = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=1080&height=1920&nologo=true"
+            
+            print(f"📸 Solicitando imagen {i} a la IA...")
             r = requests.get(url_imagen)
+            
+            # Verificación: Si Pollinations no devuelve un JPEG real, usamos la rueda de repuesto
+            if r.status_code != 200 or b"JFIF" not in r.content[:100] and b"ffd8" not in r.content.hex()[:10]:
+                print(f"⚠️ Pollinations rechazó la escena {i}. Activando imagen de emergencia...")
+                palabra_clave = urllib.parse.quote(texto.split()[-1]) # Usa la última palabra del subtítulo
+                url_emergencia = f"https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1080&h=1920&fit=crop"
+                r = requests.get(url_emergencia)
+
             with open(img_file, 'wb') as f:
                 f.write(r.content)
 
@@ -69,9 +80,12 @@ async def produccion_video_async(escenas):
                 scene_file
             ]
             
-            # Ejecutamos FFmpeg de forma limpia
             subprocess.run(cmd_escena, check=True)
             print(f"✅ Escena {i} lista y empaquetada.")
+            
+            # --- PAUSA ANTI-SPAM (Crucial para no quemar la IP) ---
+            print("⏳ Dándole 4 segundos de respiro a los servidores de imágenes...")
+            time.sleep(4)
 
         # --- 6. UNIR LAS PIEZAS ---
         print("🧩 Concatonando master final...")
@@ -94,7 +108,6 @@ async def produccion_video_async(escenas):
         print(f"❌ Error catastrófico en la línea de montaje: {e}")
 
 def iniciar_hilo_de_render(escenas):
-    """Crea un entorno limpio aislado para el proceso de renderizado asíncrono"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(produccion_video_async(escenas))
@@ -107,7 +120,6 @@ def generar_video():
     if not escenas: 
         return jsonify({"error": "No data"}), 400
         
-    # Arrancamos el hilo limpio que controlará la asincronía sin ahogar la RAM de Flask
     threading.Thread(target=iniciar_hilo_de_render, args=(escenas,)).start()
     return jsonify({"status": "Procesando nuevo estilo..."}), 202
 
