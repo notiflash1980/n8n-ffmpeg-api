@@ -16,7 +16,8 @@ N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook/video-listo"
 
 def generar_voz_sincrona(texto, archivo_salida):
     async def _async_run():
-        communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+15%")
+        # CAMBIO 1: Velocidad al +20% para un ritmo ágil de noticiero sin perder dicción
+        communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+20%")
         await communicate.save(archivo_salida)
     asyncio.run(_async_run())
 
@@ -65,7 +66,8 @@ def procesar_video_en_background(escenas):
                 "ffmpeg", "-y",
                 "-loop", "1", "-framerate", "25", "-i", img_file,
                 "-i", audio_file,
-                "-vf", f"format=yuv420p,{efecto_elegido}",
+                # CAMBIO 2: Solución a imágenes estiradas (escala la imagen, recorta el sobrante y luego aplica el zoom)
+                "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p,{efecto_elegido}",
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "192k",
                 "-shortest",
@@ -74,6 +76,9 @@ def procesar_video_en_background(escenas):
             
             subprocess.run(cmd_escena, check=True)
             print(f"scene_{i}.mp4")
+            
+            # CAMBIO 3: Pausa exacta de 2 segundos entre escenas para estabilizar la API sin perder tiempo
+            time.sleep(2)
 
         # 6. CONCATENAR
         print("🧩 Juntando todas las escenas...")
