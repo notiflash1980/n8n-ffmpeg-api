@@ -106,6 +106,11 @@ def procesar_video_en_background(escenas):
     except Exception as e:
         print(f"❌ Error: {e}")
 
+# --- RUTA DE SALUD PARA CRON-JOB.ORG ---
+@app.route('/', methods=['GET'])
+def health_check():
+    return "Servidor activo y listo para la acción 🎬", 200
+    
 @app.route('/render', methods=['POST'])
 def generar_video():
     data = request.json
