@@ -49,7 +49,8 @@ def procesar_video_en_background(escenas):
             
             for intento in range(3):
                 try:
-                    r = requests.get(url_imagen, timeout=20)
+                    # CAMBIO APLICADO AQUÍ: 60 segundos de paciencia para imágenes pesadas
+                    r = requests.get(url_imagen, timeout=60)
                     # Verifica código 200 OK y que el archivo no sea un simple texto de error (peso > 5KB)
                     if r.status_code == 200 and len(r.content) > 5000: 
                         with open(img_file, 'wb') as f:
@@ -125,19 +126,4 @@ def procesar_video_en_background(escenas):
                 try: os.remove(f_temp)
                 except: pass
 
-    except Exception as e:
-        print(f"❌ Error crítico en el flujo: {e}")
-
-@app.route('/render', methods=['POST'])
-def generar_video():
-    data = request.json
-    escenas = data.get('lista_escenas', [])
-    if not escenas: 
-        return jsonify({"error": "No data"}), 400
-        
-    threading.Thread(target=procesar_video_en_background, args=(escenas,)).start()
-    return jsonify({"status": "Procesando nuevo estilo..."}), 202
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    except Exception as
