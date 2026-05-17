@@ -14,9 +14,14 @@ app = Flask(__name__)
 
 N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook/video-listo"
 
+# --- RUTA DE SALUD PARA CRON-JOB.ORG ---
+@app.route('/', methods=['GET'])
+def health_check():
+    return "Servidor activo y listo para la acción 🎬", 200
+
 def generar_voz_sincrona(texto, archivo_salida):
     async def _async_run():
-        # CAMBIO 1: Velocidad al +20% para un ritmo ágil de noticiero sin perder dicción
+        # Velocidad al +20% para ritmo de TikTok
         communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+20%")
         await communicate.save(archivo_salida)
     asyncio.run(_async_run())
@@ -35,14 +40,31 @@ def procesar_video_en_background(escenas):
             audio_file = f"audio_{i}.mp3"
             generar_voz_sincrona(texto, audio_file)
 
-            # 2. IMAGEN
+            # 2. IMAGEN (CON BLINDAJE ANTIFALLOS)
             img_file = f"img_{i}.jpg"
             url_imagen = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=1080&height=1920&nologo=true"
             
             print(f"📸 Solicita escena {i}: {url_imagen}")
-            r = requests.get(url_imagen)
-            with open(img_file, 'wb') as f:
-                f.write(r.content)
+            exito_imagen = False
+            
+            for intento in range(3):
+                try:
+                    r = requests.get(url_imagen, timeout=20)
+                    # Verifica código 200 OK y que el archivo no sea un simple texto de error (peso > 5KB)
+                    if r.status_code == 200 and len(r.content) > 5000: 
+                        with open(img_file, 'wb') as f:
+                            f.write(r.content)
+                        exito_imagen = True
+                        break # Éxito, salimos del bucle de intentos
+                    else:
+                        print(f"⚠️ Servidor ocupado en escena {i}. Reintentando ({intento+1}/3)...")
+                        time.sleep(3)
+                except Exception as e:
+                    print(f"⚠️ Error de red en escena {i}: {e}. Reintentando...")
+                    time.sleep(3)
+                    
+            if not exito_imagen:
+                raise Exception(f"Fallo crítico: Imposible generar imagen de escena {i} tras 3 intentos. Abortando.")
 
             # 3. TEXTO
             texto_con_saltos = "\n".join(textwrap.wrap(texto, width=28))
@@ -66,7 +88,7 @@ def procesar_video_en_background(escenas):
                 "ffmpeg", "-y",
                 "-loop", "1", "-framerate", "25", "-i", img_file,
                 "-i", audio_file,
-                # CAMBIO 2: Solución a imágenes estiradas (escala la imagen, recorta el sobrante y luego aplica el zoom)
+                # Solución a imágenes estiradas
                 "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p,{efecto_elegido}",
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "192k",
@@ -75,9 +97,9 @@ def procesar_video_en_background(escenas):
             ]
             
             subprocess.run(cmd_escena, check=True)
-            print(f"scene_{i}.mp4")
+            print(f"scene_{i}.mp4 completada.")
             
-            # CAMBIO 3: Pausa exacta de 2 segundos entre escenas para estabilizar la API sin perder tiempo
+            # --- ESPERA EXACTA DE 2 SEGUNDOS ---
             time.sleep(2)
 
         # 6. CONCATENAR
@@ -104,13 +126,8 @@ def procesar_video_en_background(escenas):
                 except: pass
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error crítico en el flujo: {e}")
 
-# --- RUTA DE SALUD PARA CRON-JOB.ORG ---
-@app.route('/', methods=['GET'])
-def health_check():
-    return "Servidor activo y listo para la acción 🎬", 200
-    
 @app.route('/render', methods=['POST'])
 def generar_video():
     data = request.json
