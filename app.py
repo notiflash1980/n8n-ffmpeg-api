@@ -14,15 +14,9 @@ app = Flask(__name__)
 
 N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook/video-listo"
 
-# --- RUTA DE SALUD PARA CRON-JOB.ORG ---
-@app.route('/', methods=['GET'])
-def health_check():
-    return "Servidor activo y listo para la acción 🎬", 200
-
 def generar_voz_sincrona(texto, archivo_salida):
     async def _async_run():
-        # Velocidad al +20% para ritmo rápido
-        communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+20%")
+        communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+15%")
         await communicate.save(archivo_salida)
     asyncio.run(_async_run())
 
@@ -40,13 +34,11 @@ def procesar_video_en_background(escenas):
             audio_file = f"audio_{i}.mp3"
             generar_voz_sincrona(texto, audio_file)
 
-            # 2. IMAGEN (DESCARGA DIRECTA "KAMIKAZE")
+            # 2. IMAGEN
             img_file = f"img_{i}.jpg"
             url_imagen = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=1080&height=1920&nologo=true"
             
             print(f"📸 Solicita escena {i}: {url_imagen}")
-            
-            # Sin timeout, espera pacientemente a que Pollinations termine
             r = requests.get(url_imagen)
             with open(img_file, 'wb') as f:
                 f.write(r.content)
@@ -65,7 +57,7 @@ def procesar_video_en_background(escenas):
             ]
             efecto_elegido = random.choice(efectos)
 
-            # 5. RENDER (CON CURA ANTI-ESTIRAMIENTO)
+            # 5. RENDER
             scene_file = f"scene_{i}.mp4"
             archivos_mp4.append(scene_file)
             
@@ -73,8 +65,7 @@ def procesar_video_en_background(escenas):
                 "ffmpeg", "-y",
                 "-loop", "1", "-framerate", "25", "-i", img_file,
                 "-i", audio_file,
-                # El recorte mágico que evita el estiramiento:
-                "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p,{efecto_elegido}",
+                "-vf", f"format=yuv420p,{efecto_elegido}",
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "192k",
                 "-shortest",
@@ -84,7 +75,7 @@ def procesar_video_en_background(escenas):
             subprocess.run(cmd_escena, check=True)
             print(f"scene_{i}.mp4 completada.")
             
-            # --- ESPERA EXACTA DE 2 SEGUNDOS ---
+            # --- PAUSA DE 2 SEGUNDOS ---
             time.sleep(2)
 
         # 6. CONCATENAR
@@ -111,7 +102,7 @@ def procesar_video_en_background(escenas):
                 except: pass
 
     except Exception as e:
-        print(f"❌ Error crítico en el flujo: {e}")
+        print(f"❌ Error: {e}")
 
 @app.route('/render', methods=['POST'])
 def generar_video():
