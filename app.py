@@ -73,10 +73,7 @@ def procesar_video_en_background(escenas):
             ]
             
             subprocess.run(cmd_escena, check=True)
-            print(f"scene_{i}.mp4 completada.")
-            
-            # --- PAUSA DE 2 SEGUNDOS ---
-            time.sleep(2)
+            print(f"scene_{i}.mp4")
 
         # 6. CONCATENAR
         print("🧩 Juntando todas las escenas...")
