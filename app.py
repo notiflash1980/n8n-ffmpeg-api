@@ -57,7 +57,7 @@ def procesar_video_en_background(escenas):
             ]
             efecto_elegido = random.choice(efectos)
 
-            # 5. RENDER
+            # 5. RENDER CON FILTRO SILENCEREMOVE
             scene_file = f"scene_{i}.mp4"
             archivos_mp4.append(scene_file)
             
@@ -66,6 +66,8 @@ def procesar_video_en_background(escenas):
                 "-loop", "1", "-framerate", "25", "-i", img_file,
                 "-i", audio_file,
                 "-vf", f"format=yuv420p,{efecto_elegido}",
+                # AÑADIMOS ESTO: Filtro de audio para detectar y eliminar silencios al final
+                "-af", "silenceremove=start_periods=1:start_silence=0.1:start_threshold=-40dB:stop_periods=-1:stop_duration=0.5:stop_threshold=-40dB",
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "192k",
                 "-shortest",
