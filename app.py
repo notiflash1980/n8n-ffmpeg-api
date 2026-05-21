@@ -66,7 +66,6 @@ def procesar_video_en_background(escenas):
                 "-loop", "1", "-framerate", "25", "-i", img_file,
                 "-i", audio_file,
                 "-vf", f"format=yuv420p,{efecto_elegido}",
-                # AÑADIMOS ESTO: Filtro de audio para detectar y eliminar silencios al final
                 "-af", "silenceremove=start_periods=1:start_silence=0.1:start_threshold=-40dB:stop_periods=-1:stop_duration=0.5:stop_threshold=-40dB",
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "192k",
@@ -77,16 +76,21 @@ def procesar_video_en_background(escenas):
             subprocess.run(cmd_escena, check=True)
             print(f"scene_{i}.mp4")
 
-        # 6. CONCATENAR
-        print("🧩 Juntando todas las escenas...")
-        with open("list.txt", "w") as f:
-            for mp4 in archivos_mp4:
-                f.write(f"file '{mp4}'\n")
-
-        cmd_concat = [
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt",
-            "-c", "copy", "output_final.mp4"
-        ]
+        # 6. CONCATENAR (Método de filtro complejo para evitar DTS errors)
+        print("🧩 Juntando todas las escenas con filtro de tiempo...")
+        
+        filter_complex = "".join([f"[{i}:v][{i}:a]" for i in range(len(archivos_mp4))]) + f"concat=n={len(archivos_mp4)}:v=1:a=1[v][a]"
+        
+        cmd_concat = ["ffmpeg", "-y"]
+        for mp4 in archivos_mp4:
+            cmd_concat.extend(["-i", mp4])
+        
+        cmd_concat.extend([
+            "-filter_complex", filter_complex,
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "output_final.mp4"
+        ])
         subprocess.run(cmd_concat, check=True)
 
         # 7. ENVIAR A N8N
