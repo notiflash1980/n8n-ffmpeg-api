@@ -16,7 +16,7 @@ N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook/video-listo"
 
 def generar_voz_sincrona(texto, archivo_salida):
     async def _async_run():
-        communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+15%")
+        communicate = edge_tts.Communicate(texto, "es-MX-JorgeNeural", rate="+20%")
         await communicate.save(archivo_salida)
     asyncio.run(_async_run())
 
@@ -66,8 +66,7 @@ def procesar_video_en_background(escenas):
                 "-loop", "1", "-framerate", "25", "-i", img_file,
                 "-i", audio_file,
                 "-vf", f"format=yuv420p,{efecto_elegido}",
-                # AÑADIMOS ESTO: Filtro de audio para detectar y eliminar silencios al final
-                "-af", "silenceremove=start_periods=1:start_silence=0.1:start_threshold=-40dB:stop_periods=-1:stop_duration=0.5:stop_threshold=-40dB",
+                "-af", "silenceremove=stop_periods=-1:stop_duration=0.1:stop_threshold=-40dB",
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "192k",
                 "-shortest",
