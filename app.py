@@ -76,15 +76,17 @@ def procesar_video_en_background(escenas):
             subprocess.run(cmd_escena, check=True)
             print(f"scene_{i}.mp4")
 
-        # 6. CONCATENAR
-        print("🧩 Juntando todas las escenas...")
+        # 6. CONCATENAR (Re-codificación forzada para limpiar tiempos)
+        print("🧩 Juntando todas las escenas y limpiando tiempos...")
         with open("list.txt", "w") as f:
             for mp4 in archivos_mp4:
                 f.write(f"file '{mp4}'\n")
 
+        # Cambiamos "-c", "copy" por re-codificación real para eliminar desfases
         cmd_concat = [
             "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt",
-            "-c", "copy", "output_final.mp4"
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "aac", "output_final.mp4"
         ]
         subprocess.run(cmd_concat, check=True)
 
