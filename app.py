@@ -22,6 +22,8 @@ def generar_voz_sincrona(texto, archivo_salida):
 
 def procesar_video_en_background(escenas):
     archivos_mp4 = []
+    # 1. CREAMOS LA LISTA MAESTRA DE LIMPIEZA
+    archivos_a_borrar = ["list.txt", "output_final.mp4"]
     
     try:
         print(f"🎬 Iniciando producción de {len(escenas)} escenas...")
@@ -30,14 +32,20 @@ def procesar_video_en_background(escenas):
             prompt = escena.get('titulo', '')
             texto = escena.get('subtitulo', '')
             
-            # 1. AUDIO
+            # Nombramos los archivos
             audio_file = f"audio_{i}.mp3"
+            img_file = f"img_{i}.jpg"
+            txt_file = f"subtitulo_{i}.txt"
+            scene_file = f"scene_{i}.mp4"
+
+            # 2. LOS AGREGAMOS AL REGISTRO DE LIMPIEZA INMEDIATAMENTE
+            archivos_a_borrar.extend([audio_file, img_file, txt_file, scene_file])
+            
+            # 1. AUDIO
             generar_voz_sincrona(texto, audio_file)
 
             # 2. IMAGEN
-            img_file = f"img_{i}.jpg"
             url_imagen = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=1080&height=1920&nologo=true"
-            
             print(f"📸 Solicita escena {i}: {url_imagen}")
             r = requests.get(url_imagen)
             with open(img_file, 'wb') as f:
@@ -45,7 +53,6 @@ def procesar_video_en_background(escenas):
 
             # 3. TEXTO
             texto_con_saltos = "\n".join(textwrap.wrap(texto, width=28))
-            txt_file = f"subtitulo_{i}.txt"
             with open(txt_file, "w", encoding="utf-8") as f:
                 f.write(texto_con_saltos)
 
@@ -58,7 +65,6 @@ def procesar_video_en_background(escenas):
             efecto_elegido = random.choice(efectos)
 
             # 5. RENDER CON FILTRO SILENCEREMOVE
-            scene_file = f"scene_{i}.mp4"
             archivos_mp4.append(scene_file)
             
             cmd_escena = [
@@ -74,15 +80,14 @@ def procesar_video_en_background(escenas):
             ]
             
             subprocess.run(cmd_escena, check=True)
-            print(f"scene_{i}.mp4")
+            print(f"scene_{i}.mp4 generada")
 
-        # 6. CONCATENAR (Re-codificación forzada para limpiar tiempos)
+        # 6. CONCATENAR
         print("🧩 Juntando todas las escenas y limpiando tiempos...")
         with open("list.txt", "w") as f:
             for mp4 in archivos_mp4:
                 f.write(f"file '{mp4}'\n")
 
-        # Cambiamos "-c", "copy" por re-codificación real para eliminar desfases
         cmd_concat = [
             "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt",
             "-c:v", "libx264", "-preset", "ultrafast",
@@ -95,14 +100,19 @@ def procesar_video_en_background(escenas):
             requests.post(N8N_WEBHOOK_URL, files={'video': ('video.mp4', video_file, 'video/mp4')})
         print("🚀 ¡Video enviado a n8n!")
 
-        # Limpieza
-        for f_temp in archivos_mp4 + ["list.txt", "output_final.mp4"]:
-            if os.path.exists(f_temp):
-                try: os.remove(f_temp)
-                except: pass
-
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error en el procesamiento: {e}")
+
+    finally:
+        # 3. BLOQUE FINALLY: Esta sección se ejecuta SIEMPRE, incluso si hubo un error.
+        print("🧹 Iniciando limpieza de servidor...")
+        for f_temp in archivos_a_borrar:
+            if os.path.exists(f_temp):
+                try: 
+                    os.remove(f_temp)
+                except Exception as ex: 
+                    print(f"⚠️ No se pudo borrar {f_temp}: {ex}")
+        print("✨ Limpieza completada.")
 
 @app.route('/render', methods=['POST'])
 def generar_video():
