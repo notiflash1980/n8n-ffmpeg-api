@@ -44,12 +44,37 @@ def procesar_video_en_background(escenas):
             # 1. AUDIO
             generar_voz_sincrona(texto, audio_file)
 
-            # 2. IMAGEN
+            # 2. IMAGEN SEGURA CON REINTENTOS
             url_imagen = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=1080&height=1920&nologo=true"
             print(f"📸 Solicita escena {i}: {url_imagen}")
-            r = requests.get(url_imagen)
-            with open(img_file, 'wb') as f:
-                f.write(r.content)
+            
+            max_reintentos = 3
+            imagen_valida = False
+            
+            for intento in range(max_reintentos):
+                try:
+                    r = requests.get(url_imagen, timeout=30)
+                    # Verificamos código 200 y que realmente sea un archivo de imagen
+                    if r.status_code == 200 and 'image' in r.headers.get('Content-Type', ''):
+                        with open(img_file, 'wb') as f:
+                            f.write(r.content)
+                        
+                        # Validamos que el archivo tenga un peso lógico (> 5KB)
+                        if os.path.getsize(img_file) > 5000:
+                            imagen_valida = True
+                            break
+                        else:
+                            print(f"⚠️ Imagen corrupta o muy pequeña. Reintentando...")
+                    else:
+                        print(f"⚠️ Servidor Pollinations ocupado (Código {r.status_code}). Intento {intento+1}/{max_reintentos}...")
+                
+                except requests.exceptions.RequestException as e:
+                    print(f"⚠️ Error de red al descargar imagen: {e}")
+                
+                time.sleep(3) # Esperamos 3 segundos antes del próximo intento
+                
+            if not imagen_valida:
+                raise Exception(f"Imposible obtener una imagen válida de Pollinations para la escena {i} después de {max_reintentos} intentos.")
 
             # 3. TEXTO
             texto_con_saltos = "\n".join(textwrap.wrap(texto, width=28))
