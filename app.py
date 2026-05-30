@@ -119,7 +119,20 @@ def procesar_video_en_background(escenas):
             "-c:a", "aac", "output_final.mp4"
         ]
         subprocess.run(cmd_concat, check=True)
+# 6. CONCATENAR
+        print("🧩 Juntando todas las escenas y limpiando tiempos...")
+        with open("list.txt", "w") as f:
+            for mp4 in archivos_mp4:
+                f.write(f"file '{mp4}'\n")
 
+        cmd_concat = [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt",
+            "-c:v", "libx264", "-preset", "ultrafast", 
+            "-threads", "1", 
+            "-max_muxing_queue_size", "1024",
+            "-c:a", "aac", "output_final.mp4"
+        ]
+        subprocess.run(cmd_concat, check=True)
         # 7. ENVIAR A N8N
         with open("output_final.mp4", "rb") as video_file:
             requests.post(N8N_WEBHOOK_URL, files={'video': ('video.mp4', video_file, 'video/mp4')})
