@@ -53,7 +53,7 @@ def procesar_video_en_background(escenas):
             
             for intento in range(max_reintentos):
                 try:
-                    r = requests.get(url_imagen, timeout=30)
+                    r = requests.get(url_imagen, timeout=90)
                     # Verificamos código 200 y que realmente sea un archivo de imagen
                     if r.status_code == 200 and 'image' in r.headers.get('Content-Type', ''):
                         with open(img_file, 'wb') as f:
