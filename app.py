@@ -32,17 +32,25 @@ def procesar_video_en_background(escenas):
             prompt = escena.get('titulo', '')
             texto = escena.get('subtitulo', '')
             
-            # Nombramos los archivos
+            # Nombramos los archivos (Añadido raw_audio)
+            raw_audio = f"raw_audio_{i}.mp3"
             audio_file = f"audio_{i}.mp3"
             img_file = f"img_{i}.jpg"
             txt_file = f"subtitulo_{i}.txt"
             scene_file = f"scene_{i}.mp4"
 
             # 2. LOS AGREGAMOS AL REGISTRO DE LIMPIEZA INMEDIATAMENTE
-            archivos_a_borrar.extend([audio_file, img_file, txt_file, scene_file])
+            archivos_a_borrar.extend([raw_audio, audio_file, img_file, txt_file, scene_file])
             
-            # 1. AUDIO
-            generar_voz_sincrona(texto, audio_file)
+            # 1. AUDIO (Generación y limpieza previa de silencios)
+            generar_voz_sincrona(texto, raw_audio)
+            
+            cmd_audio = [
+                "ffmpeg", "-y", "-i", raw_audio,
+                "-af", "silenceremove=stop_periods=-1:stop_duration=0.1:stop_threshold=-40dB",
+                audio_file
+            ]
+            subprocess.run(cmd_audio, check=True)
 
             # 2. IMAGEN SEGURA CON REINTENTOS
             url_imagen = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=1080&height=1920&nologo=true"
@@ -89,7 +97,7 @@ def procesar_video_en_background(escenas):
             ]
             efecto_elegido = random.choice(efectos)
 
-            # 5. RENDER CON FILTRO SILENCEREMOVE
+            # 5. RENDER (El audio ya entra limpio, el -shortest cortará perfecto)
             archivos_mp4.append(scene_file)
             
             cmd_escena = [
@@ -97,7 +105,6 @@ def procesar_video_en_background(escenas):
                 "-loop", "1", "-framerate", "25", "-i", img_file,
                 "-i", audio_file,
                 "-vf", f"format=yuv420p,{efecto_elegido}",
-                "-af", "silenceremove=stop_periods=-1:stop_duration=0.1:stop_threshold=-40dB",
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "192k",
                 "-shortest",
@@ -107,32 +114,18 @@ def procesar_video_en_background(escenas):
             subprocess.run(cmd_escena, check=True)
             print(f"scene_{i}.mp4 generada")
 
-       # 6. CONCATENAR
-        print("🧩 Juntando todas las escenas y limpiando tiempos...")
+        # 6. CONCATENAR (Un solo bloque, método copy original rápido y sin consumo de RAM)
+        print("🧩 Juntando todas las escenas (Método Copy)...")
         with open("list.txt", "w") as f:
             for mp4 in archivos_mp4:
                 f.write(f"file '{mp4}'\n")
 
         cmd_concat = [
             "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt",
-            "-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", 
-            "-c:a", "aac", "output_final.mp4"
+            "-c", "copy", "output_final.mp4"
         ]
         subprocess.run(cmd_concat, check=True)
-# 6. CONCATENAR
-        print("🧩 Juntando todas las escenas y limpiando tiempos...")
-        with open("list.txt", "w") as f:
-            for mp4 in archivos_mp4:
-                f.write(f"file '{mp4}'\n")
-
-        cmd_concat = [
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt",
-            "-c:v", "libx264", "-preset", "ultrafast", 
-            "-threads", "1", 
-            "-max_muxing_queue_size", "1024",
-            "-c:a", "aac", "output_final.mp4"
-        ]
-        subprocess.run(cmd_concat, check=True)
+        
         # 7. ENVIAR A N8N
         with open("output_final.mp4", "rb") as video_file:
             requests.post(N8N_WEBHOOK_URL, files={'video': ('video.mp4', video_file, 'video/mp4')})
