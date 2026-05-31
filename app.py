@@ -145,6 +145,11 @@ def procesar_video_en_background(escenas):
                     print(f"⚠️ No se pudo borrar {f_temp}: {ex}")
         print("✨ Limpieza completada.")
 
+# --- PUERTA PARA EL CRON JOB ---
+@app.route('/', methods=['GET'])
+def health_check():
+    return "Servidor FFmpeg despierto y a la orden", 200
+
 @app.route('/render', methods=['POST'])
 def generar_video():
     data = request.json
