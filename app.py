@@ -12,7 +12,7 @@ import edge_tts
 
 app = Flask(__name__)
 
-N8N_WEBHOOK_URL = "https://n8n-hv24.onrender.com/webhook/video-listo"
+N8N_WEBHOOK_URL = "http://localhost:5678/webhook/a94e22dd-e34f-40f5-9e10-eb5be9e6d4a8/webhook"
 
 def generar_voz_sincrona(texto, archivo_salida):
     async def _async_run():
